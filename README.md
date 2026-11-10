@@ -1,7 +1,20 @@
-# CyberPong — 4E11_game
+# CyberPong 霓虹乒乓 — 4E11_game
 
-HTML5 桌球遊戲，支援單人對 AI 及本機雙人。
+HTML5 乒乓遊戲，繁體中文介面，支援單人對電腦（新手／標準／高手）及同機雙人對打。
 
 網站：https://lphky.github.io/4E11_game/
 
-以 main 分支根目錄發佈 GitHub Pages。index.html 保留上載原檔，使用 Tailwind CDN 及 Google Fonts，需要網絡連線。
+## 手機
+- 直放：球桌自動轉為直向，藍色球拍在下方，手指左右滑動。
+- 打橫：橫向球桌，藍色球拍在左方，手指上下滑動。
+- 雙人：多點觸控，各自按住自己半邊球桌。
+- 轉向、切換 App 時自動暫停；繼續時有 3 秒倒數。
+- 物理固定 60Hz，120Hz 手機速度一致；高速球不會穿過球拍。
+
+設定、靜音及最佳連擊存在瀏覽器 localStorage。
+
+## 檔案
+- `index.html`：現行版本（單檔，只用 Google Fonts 的 Orbitron 標題字）。
+- `v1.html`：上載原檔，保留不改。
+
+以 main 分支根目錄發佈 GitHub Pages。
