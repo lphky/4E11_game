@@ -119,6 +119,7 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   color:#cbd5e1;font-size:14px;line-height:1.6;
 }
 .help p{margin:0}
+.note{margin:8px 2px 0;font-size:13px;line-height:1.5;color:var(--amber)}
 .help p+p{margin-top:4px}
 .help .best{color:var(--amber)}
 .badge{display:inline-block;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:800;letter-spacing:.08em}
@@ -205,6 +206,22 @@ h2.big{margin:10px 0 16px;font-size:clamp(26px,7vw,36px);font-weight:900}
             <button data-value="medium">標準</button>
             <button data-value="hard">高手</button>
           </div>
+        </div>
+        <div id="ctrlGroup" hidden>
+          <span class="label" id="lblCtrl">操控方式</span>
+          <div class="seg" role="group" aria-labelledby="lblCtrl" data-key="control">
+            <button data-value="touch">手指滑動</button>
+            <button data-value="tilt">傾側手機<small>陀螺儀</small></button>
+          </div>
+          <div id="sensGroup" hidden style="margin-top:8px">
+            <span class="label" id="lblSens">傾側靈敏度</span>
+            <div class="seg" role="group" aria-labelledby="lblSens" data-key="sens">
+              <button data-value="low">低<small>大幅傾側</small></button>
+              <button data-value="mid">中</button>
+              <button data-value="high">高<small>輕微傾側</small></button>
+            </div>
+          </div>
+          <p class="note" id="tiltNote" hidden></p>
         </div>
         <div>
           <span class="label" id="lblTarget">勝出分數</span>
@@ -300,7 +317,7 @@ const store = {
   get(k, d){ try { const v = localStorage.getItem('cyberpong.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v){ try { localStorage.setItem('cyberpong.' + k, JSON.stringify(v)); } catch (e) {} }
 };
-const settings = Object.assign({ mode: '1P', difficulty: 'medium', target: '11' }, store.get('settings', {}));
+const settings = Object.assign({ mode: '1P', difficulty: 'medium', target: '11', control: 'touch', sens: 'mid' }, store.get('settings', {}));
 sound.muted = store.get('muted', false);
 let bestRally = store.get('bestRally', 0);
 
@@ -357,6 +374,8 @@ function syncSettingsUI(){
     seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.value === settings[seg.dataset.key])));
   });
   $('diffGroup').hidden = settings.mode !== '1P';
+  $('ctrlGroup').hidden = !tilt.supported || settings.mode !== '1P';
+  $('sensGroup').hidden = settings.control !== 'tilt';
   $('hudTarget').textContent = `先得 ${settings.target} 分`;
   p2.human = settings.mode === '2P';
   $('nameP1').textContent = p2.human ? '玩家一' : '你';
@@ -372,8 +391,10 @@ function updateHelp(){
   if (isTouch){
     lines = two
       ? [`兩人各按住自己半邊球桌${slide}滑動：藍色球拍在${near}，粉紅球拍在${far}。`]
-      : [`手指在球桌上${slide}滑動，${near}藍色球拍會跟住手指。`];
-    lines.push('手機直放或打橫都可以玩，畫面會自動轉向。');
+      : tiltOn()
+        ? [`把手機向${slide}傾側，${near}藍色球拍會向較低的一邊移動；每次倒數時會以當刻手機角度作為中間位置。`, '傾側時建議先開啟手機的「螢幕方向鎖定」，避免畫面轉向。']
+        : [`手指在球桌上${slide}滑動，${near}藍色球拍會跟住手指。`];
+    if (!tiltOn()) lines.push('手機直放或打橫都可以玩，畫面會自動轉向。');
   } else {
     lines = two
       ? ['玩家一：W／S 或滑鼠（左半邊）；玩家二：↑／↓ 或滑鼠（右半邊）。']
@@ -388,6 +409,8 @@ document.querySelectorAll('.seg').forEach(seg => {
     const b = e.target.closest('button'); if (!b) return;
     settings[seg.dataset.key] = b.dataset.value;
     store.set('settings', settings);
+    if (seg.dataset.key === 'control' && b.dataset.value === 'tilt') tilt.enable();
+    else if (seg.dataset.key === 'control') tiltNote('');
     syncSettingsUI();
   });
 });
@@ -427,6 +450,7 @@ $('btnMenu2').addEventListener('click', toMenu);
 function toMenu(){ state = 'MENU'; show(menuOv); updateHelp(); }
 function startMatch(){
   sound.init();
+  if (tiltOn() && !tilt.granted) tilt.enable();
   s1 = s2 = rally = maxRally = 0; playMs = 0; topSpeed = V0; confetti = []; particles = [];
   p1.y = p1.ty = p2.y = p2.ty = H / 2 - PH / 2;
   firstServe = true;
@@ -435,7 +459,7 @@ function startMatch(){
   show(null);
   countdown();
 }
-function countdown(){ state = 'COUNTDOWN'; timer = 1800; lastTick = 4; }
+function countdown(){ state = 'COUNTDOWN'; timer = 1800; lastTick = 4; tilt.calibrate = true; }
 function pause(reason){
   if (!['PLAYING', 'COUNTDOWN', 'POINT'].includes(state)) return;
   state = 'PAUSED';
@@ -444,7 +468,7 @@ function pause(reason){
   pointers.clear();
   show(pauseOv);
 }
-function resume(){ if (state !== 'PAUSED') return; sound.init(); show(null); countdown(); }
+function resume(){ if (state !== 'PAUSED') return; sound.init(); if (tiltOn() && !tilt.granted) tilt.enable(); show(null); countdown(); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
 // ---------- 鍵盤 ----------
@@ -480,6 +504,59 @@ const release = e => pointers.delete(e.pointerId);
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---------- 陀螺儀（傾側手機控制球拍） ----------
+function tiltNote(msg){ const n = $('tiltNote'); n.textContent = msg; n.hidden = !msg; }
+function tiltOn(){ return tilt.supported && settings.control === 'tilt' && settings.mode === '1P'; }
+function screenAngle(){
+  const a = screen.orientation && typeof screen.orientation.angle === 'number' ? screen.orientation.angle : (window.orientation || 0);
+  return ((a % 360) + 360) % 360 * Math.PI / 180;
+}
+function fallbackToTouch(msg){
+  settings.control = 'touch'; store.set('settings', settings); syncSettingsUI();
+  tiltNote(msg); if (state !== 'MENU') combo(msg);
+}
+const tilt = {
+  supported: isTouch && 'DeviceOrientationEvent' in window,
+  granted: false, listening: false, gotData: false,
+  value: 0, neutral: 0, calibrate: true,
+  enable(){
+    const D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === 'function'){
+      D.requestPermission().then(r => {
+        if (r === 'granted') this.listen();
+        else fallbackToTouch('未獲准使用動作感應，已改回手指操控。可在 Safari 網站設定中允許「動作與方向」。');
+      }).catch(() => fallbackToTouch('未能開啟動作感應，已改回手指操控。'));
+    } else this.listen();
+  },
+  listen(){
+    this.granted = true; tiltNote('');
+    if (this.listening) return;
+    this.listening = true;
+    window.addEventListener('deviceorientation', e => {
+      if (e.beta == null || e.gamma == null) return;
+      const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+      const gx = Math.sin(g) * Math.cos(b), gy = -Math.sin(b);          // 重力在機身平面（x 向右、y 向上）
+      const a = screenAngle();
+      const sx = gx * Math.cos(a) - gy * Math.sin(a);                    // 轉成螢幕方向
+      const sDown = -(gx * Math.sin(a) + gy * Math.cos(a));
+      const v = view.portrait ? sx : sDown;                              // 球拍移動方向
+      this.value = this.gotData ? this.value + (v - this.value) * 0.5 : v;
+      this.gotData = true;
+    });
+    setTimeout(() => { if (!this.gotData && tiltOn()) fallbackToTouch('這部裝置沒有回傳陀螺儀數據，已改回手指操控。'); }, 2000);
+  }
+};
+function applyTilt(){
+  if (!tilt.gotData) return;
+  for (const p of pointers.values()) if (p === p1) return;             // 手指觸碰時優先
+  if (tilt.calibrate){ tilt.neutral = tilt.value; tilt.calibrate = false; }
+  const range = { low: 0.5, mid: 0.34, high: 0.22 }[settings.sens] || 0.34;   // 約 30°／20°／13°
+  const t = Math.max(-1, Math.min(1, (tilt.value - tilt.neutral) / range));
+  const lo = WALL, hi = H - PH - WALL;
+  p1.ty = lo + (t + 1) / 2 * (hi - lo);
+}
+if (tiltOn() && typeof (window.DeviceOrientationEvent || {}).requestPermission !== 'function') tilt.listen();   // iOS 要等按「開始比賽」才可請求權限
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault());
 
@@ -530,6 +607,7 @@ function updateAI(){
 }
 function updatePaddles(){
   const two = settings.mode === '2P';
+  if (tiltOn() && !two) applyTilt();
   movePaddle(p1, keys.w || keys.a || (!two && (keys.ArrowUp || keys.ArrowLeft)), keys.s || keys.d || (!two && (keys.ArrowDown || keys.ArrowRight)));
   if (two) movePaddle(p2, keys.ArrowUp || keys.ArrowLeft, keys.ArrowDown || keys.ArrowRight);
   else updateAI();
@@ -698,7 +776,7 @@ function drawMessages(){
       const sz = Math.max(13, Math.min(18, cw / 26));
       const two = settings.mode === '2P', slide = portrait ? '左右' : '上下';
       const msg = isTouch
-        ? (two ? `各自在自己半邊${slide}滑動手指` : `手指${slide}滑動控制藍色球拍`)
+        ? (two ? `各自在自己半邊${slide}滑動手指` : tiltOn() ? `拿穩手機，${slide}傾側控制藍色球拍` : `手指${slide}滑動控制藍色球拍`)
         : (two ? '玩家一 W／S　玩家二 ↑／↓' : '移動滑鼠或按 W／S 控制');
       label(msg, ch / 2 + base * (portrait ? 0.2 : 0.16), sz, '#e2e8f0', 700);
     }
